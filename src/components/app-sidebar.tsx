@@ -1,4 +1,4 @@
-import { LayoutDashboard, Smartphone, DollarSign, Users, Settings, LogOut, ArrowLeftRight } from 'lucide-react';
+import { LayoutDashboard, Smartphone, DollarSign, Users, Settings, LogOut } from 'lucide-react';
 import {
   Sidebar,
   SidebarContent,
@@ -16,8 +16,7 @@ import { useAuth } from '@/lib/auth-context';
 
 const mainMenuItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
-  { icon: Smartphone, label: 'Provayderlar', path: '/apps' },
-  { icon: ArrowLeftRight, label: "O'tkazma turlari", path: '/transfer-types' },
+  { icon: Smartphone, label: 'Ilovalar', path: '/apps' },
   { icon: DollarSign, label: 'Kurslar', path: '/rates' },
 ];
 

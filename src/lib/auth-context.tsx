@@ -1,37 +1,55 @@
 import { createContext, useContext, useEffect, useState } from 'react';
-import { api, getToken, setToken, clearToken, type User } from './api';
+import { adminApi, setAuthToken, getAuthToken, type AdminLoginResponse } from './api';
 
 interface AuthContextType {
-  user: User | null;
+  user: { id: string; username: string } | null;
   loading: boolean;
-  signIn: (phone: string, full_name: string) => Promise<{ error: Error | null }>;
+  signIn: (username: string, password: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
+  setup: (username: string, password: string) => Promise<{ error: Error | null }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<{ id: string; username: string } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = getToken();
-    if (!token) {
-      setLoading(false);
-      return;
+    const token = getAuthToken();
+    if (token) {
+      const userData = localStorage.getItem('admin_user');
+      if (userData) {
+        try {
+          setUser(JSON.parse(userData));
+        } catch {
+          localStorage.removeItem('admin_user');
+        }
+      }
     }
-    api.users.me()
-      .then((u) => setUser(u))
-      .catch(() => clearToken())
-      .finally(() => setLoading(false));
+    setLoading(false);
   }, []);
 
-  const signIn = async (phone: string, full_name: string) => {
+  const signIn = async (username: string, password: string) => {
     try {
-      const { token } = await api.auth.signIn(phone, full_name);
-      setToken(token);
-      const u = await api.users.me();
-      setUser(u);
+      const response: AdminLoginResponse = await adminApi.login({ username, password });
+      setAuthToken(response.access_token);
+      const userData = response.user ?? { id: 'admin', username };
+      setUser(userData);
+      localStorage.setItem('admin_user', JSON.stringify(userData));
+      return { error: null };
+    } catch (error) {
+      return { error: error as Error };
+    }
+  };
+
+  const setup = async (username: string, password: string) => {
+    try {
+      const response: AdminLoginResponse = await adminApi.setup({ username, password });
+      setAuthToken(response.access_token);
+      const userData = response.user ?? { id: 'admin', username };
+      setUser(userData);
+      localStorage.setItem('admin_user', JSON.stringify(userData));
       return { error: null };
     } catch (error) {
       return { error: error as Error };
@@ -39,12 +57,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
-    clearToken();
+    setAuthToken(null);
     setUser(null);
+    localStorage.removeItem('admin_user');
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signOut, setup }}>
       {children}
     </AuthContext.Provider>
   );

@@ -10,7 +10,7 @@ interface DashboardLayoutProps {
 
 export function DashboardLayout({ children, title, currentPath }: DashboardLayoutProps) {
   const { user } = useAuth();
-  const initials = user?.full_name?.charAt(0).toUpperCase() || 'A';
+  const initials = user?.username?.charAt(0).toUpperCase() || 'A';
 
   return (
     <SidebarProvider>

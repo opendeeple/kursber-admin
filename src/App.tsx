@@ -8,7 +8,6 @@ import { AppsPage } from './pages/apps';
 import { RatesPage } from './pages/rates';
 import { UsersPage } from './pages/users';
 import { SettingsPage } from './pages/settings';
-import { TransferTypesPage } from './pages/transfer-types';
 import { DashboardLayout } from './components/dashboard-layout';
 import { Toaster } from './components/ui/sonner';
 
@@ -56,9 +55,7 @@ function Router() {
       case '/':
         return 'Dashboard';
       case '/apps':
-        return 'Provayderlar';
-      case '/transfer-types':
-        return "O'tkazma turlari";
+        return 'Ilovalar';
       case '/rates':
         return 'Kurslar';
       case '/users':
@@ -76,8 +73,6 @@ function Router() {
         return <DashboardPage />;
       case '/apps':
         return <AppsPage />;
-      case '/transfer-types':
-        return <TransferTypesPage />;
       case '/rates':
         return <RatesPage />;
       case '/users':

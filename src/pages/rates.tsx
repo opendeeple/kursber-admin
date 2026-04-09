@@ -1,286 +1,226 @@
 import { useEffect, useState } from 'react';
+import { exchangeRatesApi, transferTypesApi, type ExchangeRate, type TransferType } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Switch } from '@/components/ui/switch';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { api, type Provider, type TransferType, type ExchangeRate } from '@/lib/api';
-import { Plus, Pencil, Trash2 } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Save } from 'lucide-react';
 import { toast } from 'sonner';
 
-interface RateFormData {
-  provider_id: string;
-  transfer_type_id: string;
-  rate: string;
-  commission_percent: string;
-  is_active: boolean;
-}
-
-const emptyForm: RateFormData = {
-  provider_id: '',
-  transfer_type_id: '',
-  rate: '',
-  commission_percent: '',
-  is_active: true,
-};
-
 export function RatesPage() {
-  const [providers, setProviders] = useState<Provider[]>([]);
-  const [transferTypes, setTransferTypes] = useState<TransferType[]>([]);
   const [rates, setRates] = useState<ExchangeRate[]>([]);
+  const [transferTypes, setTransferTypes] = useState<TransferType[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [editingRate, setEditingRate] = useState<ExchangeRate | null>(null);
-  const [formData, setFormData] = useState<RateFormData>(emptyForm);
+  const [saving, setSaving] = useState(false);
+  const [edits, setEdits] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    Promise.all([
-      api.providers.list(),
-      api.transferTypes.list(),
-      api.exchangeRates.all(),
-    ])
-      .then(([p, t, r]) => {
-        setProviders(p.sort((a, b) => a.sort_order - b.sort_order));
-        setTransferTypes(t.sort((a, b) => a.sort_order - b.sort_order));
-        setRates(r);
-      })
-      .catch((error) => toast.error((error as Error).message))
-      .finally(() => setLoading(false));
+    loadData();
   }, []);
 
-  const reloadRates = async () => {
+  const loadData = async () => {
+    setLoading(true);
     try {
-      const r = await api.exchangeRates.all();
-      setRates(r);
+      const [ratesData, typesData] = await Promise.all([
+        exchangeRatesApi.getAll(),
+        transferTypesApi.getAll(),
+      ]);
+      setRates(ratesData);
+      setTransferTypes(typesData.slice().sort((a, b) => a.sort_order - b.sort_order));
+      setEdits({});
     } catch (error) {
-      toast.error((error as Error).message);
+      console.error('Failed to load rates:', error);
+      toast.error('Kurslarni yuklashda xatolik');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const findRate = (providerId: string, transferTypeId: string): ExchangeRate | undefined =>
-    rates.find(r => r.provider_id === providerId && r.transfer_type_id === transferTypeId);
+  // keep alias so save handler can still call it
+  const loadRates = loadData;
 
-  const openCreate = (providerId: string, transferTypeId: string) => {
-    setEditingRate(null);
-    setFormData({ ...emptyForm, provider_id: providerId, transfer_type_id: transferTypeId });
-    setIsDialogOpen(true);
+  const handleRateChange = (id: string, value: number) => {
+    setEdits((prev) => ({ ...prev, [id]: value }));
   };
 
-  const openEdit = (rate: ExchangeRate) => {
-    setEditingRate(rate);
-    setFormData({
-      provider_id: rate.provider_id,
-      transfer_type_id: rate.transfer_type_id,
-      rate: String(rate.rate),
-      commission_percent: rate.commission_percent != null ? String(rate.commission_percent) : '',
-      is_active: rate.is_active,
-    });
-    setIsDialogOpen(true);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const saveAllRates = async () => {
+    const changed = Object.entries(edits);
+    if (changed.length === 0) {
+      toast.info('O\'zgarishlar yo\'q');
+      return;
+    }
+    setSaving(true);
     try {
-      const payload = {
-        provider_id: formData.provider_id,
-        transfer_type_id: formData.transfer_type_id,
-        rate: parseFloat(formData.rate),
-        commission_percent: formData.commission_percent ? parseFloat(formData.commission_percent) : null,
-        is_active: formData.is_active,
-      };
-
-      if (editingRate) {
-        await api.exchangeRates.update(editingRate.id, payload);
-        toast.success('Kurs yangilandi');
-      } else {
-        await api.exchangeRates.create(payload);
-        toast.success("Kurs qo'shildi");
-      }
-
-      setIsDialogOpen(false);
-      setFormData(emptyForm);
-      setEditingRate(null);
-      await reloadRates();
+      await Promise.all(
+        changed.map(([id, rate]) => exchangeRatesApi.update(id, { rate }))
+      );
+      toast.success('Barcha kurslar saqlandi!');
+      loadRates();
     } catch (error) {
-      toast.error((error as Error).message);
+      console.error('Error saving rates:', error);
+      toast.error('Saqlashda xatolik');
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleDelete = async (rate: ExchangeRate) => {
-    if (!confirm("Bu kursni o'chirmoqchimisiz?")) return;
-    try {
-      await api.exchangeRates.delete(rate.id);
-      toast.success("Kurs o'chirildi");
-      await reloadRates();
-    } catch (error) {
-      toast.error((error as Error).message);
-    }
-  };
+  // Build groups keyed by transfer type ID, using the sorted transferTypes list as the source of truth
+  const ratesByType = rates.reduce<Record<string, ExchangeRate[]>>((acc, rate) => {
+    const key = rate.transfer_type.id;
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(rate);
+    return acc;
+  }, {});
 
-  const toggleRateActive = async (rate: ExchangeRate, is_active: boolean) => {
-    try {
-      await api.exchangeRates.update(rate.id, { is_active });
-      await reloadRates();
-    } catch (error) {
-      toast.error((error as Error).message);
-    }
-  };
-
-  const getProviderName = (id: string) =>
-    providers.find(p => p.id === id)?.name ?? id;
-
-  const getTransferTypeName = (id: string) =>
-    transferTypes.find(t => t.id === id)?.name ?? id;
+  // Only show transfer types that have at least one rate
+  const groups = transferTypes
+    .filter(tt => (ratesByType[tt.id]?.length ?? 0) > 0)
+    .map(tt => ({ id: tt.id, name: tt.name, rates: ratesByType[tt.id] }));
 
   if (loading) {
-    return <div>Yuklanmoqda...</div>;
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-8 w-48" />
+        <div className="grid gap-5 md:grid-cols-2">
+          {Array.from({ length: 2 }).map((_, i) => (
+            <Card key={i}>
+              <CardContent className="pt-6">
+                <div className="space-y-2">
+                  {Array.from({ length: 4 }).map((_, j) => (
+                    <Skeleton key={j} className="h-12 w-full" />
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
   }
+
+  const hasChanges = Object.keys(edits).length > 0;
 
   return (
     <div className="space-y-6">
-      <h2 className="text-xl font-bold">Kurs boshqaruvi</h2>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Kurs boshqaruvi</h1>
+        </div>
+        <Button onClick={saveAllRates} disabled={saving || !hasChanges}>
+          <Save className="mr-2 h-4 w-4" />
+          {saving ? 'Saqlanmoqda...' : 'Saqlash'}
+        </Button>
+      </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base font-bold">Kurslar matritsasi</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse">
-              <thead>
-                <tr className="bg-muted/50">
-                  <th className="border px-3 py-2 text-left text-xs font-bold uppercase tracking-wide min-w-[140px]">
-                    Provayder
-                  </th>
-                  {transferTypes.map((tt) => (
-                    <th key={tt.id} className="border px-3 py-2 text-center text-xs font-bold uppercase tracking-wide min-w-[160px]">
-                      {tt.name}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {providers.map((provider) => (
-                  <tr key={provider.id} className="hover:bg-muted/20">
-                    <td className="border px-3 py-2 font-bold text-sm">{provider.name}</td>
-                    {transferTypes.map((tt) => {
-                      const rate = findRate(provider.id, tt.id);
-                      return (
-                        <td key={tt.id} className="border px-3 py-2 text-center">
-                          {rate ? (
-                            <div className="space-y-1">
-                              <div className="font-black text-base text-primary">{rate.rate}</div>
-                              {rate.commission_percent != null && (
-                                <div className="text-xs text-muted-foreground">
-                                  {rate.commission_percent}% komissiya
-                                </div>
-                              )}
-                              <div className="flex items-center justify-center gap-1">
-                                <Switch
-                                  checked={rate.is_active}
-                                  onCheckedChange={(checked) => toggleRateActive(rate, checked)}
-                                />
-                              </div>
-                              <div className="flex items-center justify-center gap-1">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-7 w-7 p-0"
-                                  onClick={() => openEdit(rate)}
-                                >
-                                  <Pencil className="h-3 w-3" />
-                                </Button>
-                                <Button
-                                  variant="destructive"
-                                  size="sm"
-                                  className="h-7 w-7 p-0"
-                                  onClick={() => handleDelete(rate)}
-                                >
-                                  <Trash2 className="h-3 w-3" />
-                                </Button>
-                              </div>
-                            </div>
-                          ) : (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
-                              onClick={() => openCreate(provider.id, tt.id)}
-                            >
-                              <Plus className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
+      {/* First two groups side by side */}
+      {groups.length > 0 && (
+        <div className="grid gap-5 md:grid-cols-2">
+          {groups.slice(0, 2).map((group) => (
+            <RateGroupCard
+              key={group.id}
+              title={group.name}
+              rates={group.rates}
+              edits={edits}
+              onRateChange={handleRateChange}
+            />
+          ))}
+        </div>
+      )}
 
-      <Dialog open={isDialogOpen} onOpenChange={(open) => {
-        setIsDialogOpen(open);
-        if (!open) { setFormData(emptyForm); setEditingRate(null); }
-      }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{editingRate ? 'Kursni tahrirlash' : "Kurs qo'shish"}</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Provayder</div>
-                <div className="font-bold text-sm">{getProviderName(formData.provider_id)}</div>
-              </div>
-              <div className="space-y-1">
-                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">O'tkazma turi</div>
-                <div className="font-bold text-sm">{getTransferTypeName(formData.transfer_type_id)}</div>
-              </div>
-            </div>
+      {/* Third+ groups at half width */}
+      {groups.slice(2).length > 0 && (
+        <div className="grid gap-5 md:grid-cols-2">
+          {groups.slice(2).map((group) => (
+            <RateGroupCard
+              key={group.id}
+              title={group.name}
+              rates={group.rates}
+              edits={edits}
+              onRateChange={handleRateChange}
+            />
+          ))}
+        </div>
+      )}
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Kurs</label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={formData.rate}
-                  onChange={(e) => setFormData({ ...formData, rate: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Komissiya (%)</label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={formData.commission_percent}
-                  onChange={(e) => setFormData({ ...formData, commission_percent: e.target.value })}
-                  placeholder="0"
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={formData.is_active}
-                onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
-              />
-              <span className="text-sm font-medium">Faol</span>
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
-                Bekor qilish
-              </Button>
-              <Button type="submit">Saqlash</Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+      {groups.length === 0 && (
+        <Card>
+          <CardContent className="text-center py-12 text-muted-foreground">
+            Kurslar topilmadi
+          </CardContent>
+        </Card>
+      )}
     </div>
+  );
+}
+
+function RateGroupCard({
+  title,
+  rates,
+  edits,
+  onRateChange,
+}: {
+  title: string;
+  rates: ExchangeRate[];
+  edits: Record<string, number>;
+  onRateChange: (id: string, value: number) => void;
+}) {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">{title} kurslari</CardTitle>
+      </CardHeader>
+      <CardContent className="pt-0">
+        <div className="rounded-md border overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="bg-muted/50">
+                <th className="text-left text-xs font-bold text-muted-foreground uppercase tracking-wider px-4 py-3">
+                  Ilova
+                </th>
+                <th className="text-left text-xs font-bold text-muted-foreground uppercase tracking-wider px-4 py-3">
+                  Kurs
+                </th>
+                <th className="text-left text-xs font-bold text-muted-foreground uppercase tracking-wider px-4 py-3">
+                  O'zgartirish
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rates.map((rate, i) => {
+                const currentValue = edits[rate.id] !== undefined ? edits[rate.id] : rate.rate;
+                const isEdited = edits[rate.id] !== undefined;
+                return (
+                  <tr key={rate.id} className={i < rates.length - 1 ? 'border-b' : ''}>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="h-7 w-7 rounded-lg bg-primary flex items-center justify-center text-primary-foreground font-bold text-xs flex-shrink-0">
+                          {rate.provider.name.slice(0, 2).toUpperCase()}
+                        </div>
+                        <span className="font-bold text-sm">{rate.provider.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="font-black text-green-600">{rate.rate.toFixed(2)}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={currentValue}
+                        onChange={(e) => onRateChange(rate.id, parseFloat(e.target.value) || 0)}
+                        className={`border rounded-lg px-2.5 py-1.5 text-sm font-bold w-24 outline-none transition-colors ${
+                          isEdited
+                            ? 'border-green-500 bg-green-50 dark:bg-green-950'
+                            : 'border-border focus:border-primary'
+                        }`}
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
