@@ -89,6 +89,7 @@ export function AppsPage() {
         is_featured: formData.is_featured,
         sort_order: formData.sort_order,
         link: formData.link || null,
+        icon_url: null,
       };
 
       let savedId: string;
